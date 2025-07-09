@@ -1,0 +1,136 @@
+{% extends "layout.html" %}
+{% block title %}Inventory List{% endblock %}
+
+{% block head_extra %}
+<style>
+    .table-responsive {
+        margin-top: 20px;
+    }
+    .low-stock-highlight td.quantity-cell,
+    .low-stock-highlight td.quantity-cell span { /* If quantity is wrapped in a span */
+        font-weight: bold;
+        color: #856404; /* Dark yellow for text */
+        background-color: #fff3cd !important; /* Light yellow for cell background */
+    }
+    .table th.sortable {
+        cursor: pointer;
+    }
+    .table th.sortable:hover {
+        background-color: #f1f1f1;
+    }
+    .search-bar {
+        margin-bottom: 15px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h2>Full Inventory List</h2>
+        <a href="{{ url_for('home') }}" class="btn btn-secondary">Back to Home</a>
+    </div>
+
+    <div class="row mt-3">
+        <div class="col-md-6 search-bar">
+            <input type="text" id="inventorySearchInput" class="form-control" placeholder="Search by Barcode or Name...">
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-striped table-bordered table-hover" id="inventoryTable">
+            <thead class="thead-dark">
+                <tr>
+                    <th scope="col" class="sortable" data-column="0">Barcode</th>
+                    <th scope="col" class="sortable" data-column="1">Name</th>
+                    <th scope="col" class="sortable" data-column="2" data-type="number">Quantity</th>
+                    <th scope="col" class="sortable" data-column="3">Last Updated</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if items %}
+                    {% for item in items %}
+                        <tr class="{{ 'low-stock-highlight' if item['Quantity'] < low_stock_threshold else '' }}">
+                            <td>{{ item['Barcode'] if item['Barcode'] is not none else 'N/A' }}</td>
+                            <td>{{ item['Name'] if item['Name'] is not none else 'N/A' }}</td>
+                            <td class="quantity-cell">{{ item['Quantity'] if item['Quantity'] is not none else '0' }}</td>
+                            <td>{{ item['Last Updated'] if item['Last Updated'] is not none else 'N/A' }}</td>
+                        </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center">No items found in inventory.</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+    <p><small>Items with quantity less than {{ low_stock_threshold }} are highlighted.</small></p>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // Client-side search/filter
+    const searchInput = document.getElementById('inventorySearchInput');
+    const table = document.getElementById('inventoryTable');
+    const tableBody = table.getElementsByTagName('tbody')[0];
+    const rows = tableBody.getElementsByTagName('tr');
+
+    if (searchInput) {
+        searchInput.addEventListener('keyup', function () {
+            const filter = searchInput.value.toLowerCase();
+            for (let i = 0; i < rows.length; i++) {
+                let barcodeCell = rows[i].getElementsByTagName('td')[0];
+                let nameCell = rows[i].getElementsByTagName('td')[1];
+                if (barcodeCell || nameCell) {
+                    let barcodeText = barcodeCell ? barcodeCell.textContent || barcodeCell.innerText : '';
+                    let nameText = nameCell ? nameCell.textContent || nameCell.innerText : '';
+                    if (barcodeText.toLowerCase().indexOf(filter) > -1 || nameText.toLowerCase().indexOf(filter) > -1) {
+                        rows[i].style.display = "";
+                    } else {
+                        rows[i].style.display = "none";
+                    }
+                }
+            }
+        });
+    }
+
+    // Client-side sorting
+    document.querySelectorAll('#inventoryTable th.sortable').forEach(headerCell => {
+        headerCell.addEventListener('click', () => {
+            const tableElement = headerCell.closest('table');
+            const tableBodyElement = tableElement.querySelector('tbody');
+            const column = parseInt(headerCell.dataset.column);
+            const type = headerCell.dataset.type; // 'number' or defaults to text
+            const currentIsAscending = headerCell.classList.contains('sorted-asc');
+
+            document.querySelectorAll('#inventoryTable th.sortable').forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+            });
+            headerCell.classList.toggle('sorted-asc', !currentIsAscending);
+            headerCell.classList.toggle('sorted-desc', currentIsAscending);
+
+            const direction = currentIsAscending ? -1 : 1;
+
+            Array.from(tableBodyElement.querySelectorAll('tr'))
+                .sort((rowA, rowB) => {
+                    let valA = rowA.querySelector(`td:nth-child(${column + 1})`).textContent.trim();
+                    let valB = rowB.querySelector(`td:nth-child(${column + 1})`).textContent.trim();
+
+                    if (type === 'number') {
+                        valA = parseFloat(valA) || 0; // Handle NaN with 0 or other default
+                        valB = parseFloat(valB) || 0;
+                    } else {
+                        valA = valA.toLowerCase();
+                        valB = valB.toLowerCase();
+                    }
+                    return (valA > valB ? 1 : (valA < valB ? -1 : 0)) * direction;
+                })
+                .forEach(sortedRow => tableBodyElement.appendChild(sortedRow));
+        });
+    });
+});
+</script>
+{% endblock %}

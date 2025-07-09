@@ -28,6 +28,9 @@
                 <li class="nav-item {% if request.path == '/lookup' %}active{% endif %}">
                     <a class="nav-link" href="{{ url_for('lookup_item') }}">Lookup Item</a>
                 </li>
+                <li class="nav-item {% if request.path == url_for('inventory_list') %}active{% endif %}">
+                    <a class="nav-link" href="{{ url_for('inventory_list') }}">Inventory List</a>
+                </li>
             </ul>
         </div>
     </nav>

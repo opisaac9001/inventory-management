@@ -391,3 +391,51 @@ if __name__ == '__main__':
         traceback.print_exc()
 
     print("\nGoogleSheetsHelper testing attempt finished.")
+
+    def get_all_items(self) -> list[dict]:
+        """Retrieves all items from the Inventory sheet."""
+        if not self.service:
+            print("Google Sheets service not initialized.")
+            return []
+        try:
+            # Range to get all data from Inventory sheet, starting from A2 to skip header
+            range_name = f"'{INVENTORY_SHEET_NAME}'!A2:D" # A:D means all rows in these columns
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.sheet_id, range=range_name
+            ).execute()
+
+            values = result.get('values', [])
+            if not values:
+                print("No items found in inventory.")
+                return []
+
+            items = []
+            for row in values:
+                # Pad row with None if not all columns are present, up to expected INVENTORY_COLS length
+                padded_row = row + [None] * (len(INVENTORY_COLS) - len(row))
+
+                raw_qty_val = padded_row[2] # Quantity is at index 2
+                parsed_qty = 0
+                try:
+                    if raw_qty_val is not None and str(raw_qty_val).strip() != "":
+                        parsed_qty = int(float(str(raw_qty_val)))
+                except (ValueError, TypeError):
+                    print(f"Warning: Could not parse quantity '{raw_qty_val}' for item {padded_row[0]}. Defaulting to 0.")
+
+                item_dict = {
+                    INVENTORY_COLS[0]: padded_row[0],  # Barcode
+                    INVENTORY_COLS[1]: padded_row[1],  # Name
+                    INVENTORY_COLS[2]: parsed_qty,     # Quantity
+                    INVENTORY_COLS[3]: padded_row[3]   # Last Updated
+                }
+                items.append(item_dict)
+
+            return items
+        except HttpError as e:
+            print(f"Google Sheets API error in get_all_items: {e}")
+            return []
+        except Exception as e:
+            print(f"An unexpected error occurred in get_all_items: {e}")
+            import traceback
+            traceback.print_exc()
+            return []

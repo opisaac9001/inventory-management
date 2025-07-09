@@ -162,6 +162,23 @@ def add_item_page():
     if not g.get('sheets_helper'): return redirect(url_for('setup'))
     return render_template('add_item.html')
 
+LOW_STOCK_THRESHOLD = 10 # Define globally or in app config
+
+@app.route('/inventory_list')
+def inventory_list():
+    if not g.get('sheets_helper'): return redirect(url_for('setup'))
+    helper = g.sheets_helper
+
+    items = []
+    try:
+        items = helper.get_all_items()
+    except Exception as e:
+        flash(f"Error fetching inventory list: {e}", "danger")
+        print(f"Error in /inventory_list route: {e}")
+        # items will remain empty, template should handle this
+
+    return render_template('inventory_list.html', items=items, low_stock_threshold=LOW_STOCK_THRESHOLD)
+
 
 @app.route('/add_item_submit', methods=['POST'])
 def add_item_submit():
