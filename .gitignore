@@ -1,0 +1,30 @@
+# Settings file - contains sensitive credentials
+app_settings.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.env
+.venv
+env/
+venv/
+ENV/
+VENV/
+
+# Instance folder (Flask)
+instance/
+
+# IDE and OS specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Excel file (if it ever gets recreated accidentally)
+inventory.xlsx

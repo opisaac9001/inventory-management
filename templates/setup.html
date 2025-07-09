@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Setup</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            min-height: 100vh;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa;
+        }
+        .setup-container {
+            max-width: 600px;
+            width: 100%;
+            padding: 2rem;
+            background-color: #fff;
+            border-radius: 0.5rem;
+            box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+        }
+        .textarea-json {
+            min-height: 150px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <h2 class="text-center mb-4">Inventory Application Setup</h2>
+        <p class="text-muted text-center">
+            Please provide your Google Sheet ID and Service Account JSON key content.
+            <a href="#" data-toggle="modal" data-target="#helpModal">Need Help?</a>
+        </p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('setup') }}">
+            <div class="form-group">
+                <label for="google_sheet_id">Google Sheet ID:</label>
+                <input type="text" name="google_sheet_id" id="google_sheet_id" class="form-control"
+                       value="{{ current_settings.get('google_sheet_id', '') if current_settings else '' }}"
+                       placeholder="e.g., 1aBcDeFgHiJkLmNoPqRsTuVwXyZ_1234567890" required>
+            </div>
+            <div class="form-group">
+                <label for="service_account_json">Service Account JSON Key Content:</label>
+                <textarea name="service_account_json_str" id="service_account_json" class="form-control textarea-json"
+                          placeholder="Paste the entire content of your service account JSON key file here."
+                          required>{{ current_settings.get('service_account_json_str', '') if current_settings else '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Save Configuration & Test Connection</button>
+        </form>
+        <p class="text-center mt-3">
+            <small class="text-muted">Your Service Account JSON will be stored locally on this server in <code>app_settings.json</code>. Ensure this server is secure.</small>
+        </p>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="modal fade" id="helpModal" tabindex="-1" role="dialog" aria-labelledby="helpModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="helpModalLabel">Setup Instructions</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p>To configure the application, you need to:</p>
+                    <ol>
+                        <li><strong>Create a Google Cloud Platform (GCP) Project</strong> (or use an existing one).</li>
+                        <li><strong>Enable the Google Sheets API</strong> for your project.
+                            <ul>
+                                <li>In GCP Console: APIs & Services &rarr; Library &rarr; Search "Google Sheets API" &rarr; Enable.</li>
+                            </ul>
+                        </li>
+                        <li><strong>Create a Service Account:</strong>
+                            <ul>
+                                <li>In GCP Console: APIs & Services &rarr; Credentials &rarr; + CREATE CREDENTIALS &rarr; Service account.</li>
+                                <li>Give it a name (e.g., "inventory-app-scanner"). Click "CREATE AND CONTINUE", then "DONE" (roles can be minimal for now).</li>
+                            </ul>
+                        </li>
+                        <li><strong>Generate a JSON Key for the Service Account:</strong>
+                            <ul>
+                                <li>Click on your new service account &rarr; KEYS tab &rarr; ADD KEY &rarr; Create new key &rarr; Select JSON &rarr; CREATE.</li>
+                                <li>A JSON file will download. <strong>Open this file and copy its entire content</strong> into the "Service Account JSON Key Content" field on the setup page.</li>
+                            </ul>
+                        </li>
+                        <li><strong>Create a Google Sheet:</strong>
+                            <ul>
+                                <li>Go to <a href="https://sheets.google.com/" target="_blank">Google Sheets</a> and create a new blank spreadsheet (e.g., name it "WebAppInventory").</li>
+                                <li>The <strong>Google Sheet ID</strong> is part of its URL: <code>https://docs.google.com/spreadsheets/d/<strong>SHEET_ID_HERE</strong>/edit</code>. Copy this ID into the "Google Sheet ID" field.</li>
+                            </ul>
+                        </li>
+                        <li><strong>Share the Google Sheet with the Service Account:</strong>
+                            <ul>
+                                <li>In your Google Sheet, click "Share" (top right).</li>
+                                <li>Find the <code>client_email</code> address in the JSON key content you copied (it looks like <code>your-service-account-name@your-project-id.iam.gserviceaccount.com</code>).</li>
+                                <li>Paste this email into the "Add people or groups" field, give it <strong>Editor</strong> permissions, and click "Send" (uncheck "Notify people" if desired).</li>
+                            </ul>
+                        </li>
+                    </ol>
+                    <p>Once you have the Sheet ID and the JSON key content, paste them into the respective fields on the setup page and click "Save Configuration".</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

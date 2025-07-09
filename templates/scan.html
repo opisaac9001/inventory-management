@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scan Item</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h2>Scan Item & Update Inventory</h2>
+        <a href="/" class="btn btn-secondary mb-3">Back to Home</a>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="/update_inventory">
+            <div class="form-group">
+                <label for="mode">Mode:</label>
+                <select name="mode" id="mode" class="form-control">
+                    <option value="add" selected>Add Stock</option>
+                    <option value="remove">Remove Stock</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="barcode">Barcode:</label>
+                <input type="text" name="barcode" id="barcode" class="form-control" autofocus required>
+            </div>
+            <div class="form-group">
+                <label for="quantity">Quantity:</label>
+                <input type="number" name="quantity" id="quantity" class="form-control" value="1" min="1" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Update Inventory</button>
+        </form>
+
+        <hr>
+        <h4>Last Scanned Item:</h4>
+        <p id="last_item_info">
+            {% if last_item %}
+                <strong>Name:</strong> {{ last_item.name }} <br>
+                <strong>Barcode:</strong> {{ last_item.barcode }} <br>
+                <strong>New Quantity:</strong> {{ last_item.quantity }}
+            {% else %}
+                No item scanned yet.
+            {% endif %}
+        </p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const barcodeInput = document.getElementById('barcode');
+            if (barcodeInput) {
+                barcodeInput.focus();
+            }
+        });
+    </script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

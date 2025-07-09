@@ -1,0 +1,50 @@
+{% extends "layout.html" %}
+{% block title %}Item Lookup{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Item Lookup</h2>
+    <p>Enter a barcode to see item details.</p>
+
+    <form method="GET" action="{{ url_for('lookup_item') }}" class="form-inline mb-3">
+        <div class="form-group mr-2">
+            <label for="barcode_lookup" class="sr-only">Barcode</label>
+            <input type="text" name="barcode" id="barcode_lookup" class="form-control" placeholder="Enter Barcode" value="{{ request.args.get('barcode', '') }}" autofocus required>
+        </div>
+        <button type="submit" class="btn btn-primary">Lookup</button>
+        <a href="{{ url_for('home') }}" class="btn btn-secondary ml-2">Back to Home</a>
+    </form>
+
+    {% if item_details %}
+        <div class="card">
+            <div class="card-header">
+                Item Details for Barcode: <strong>{{ item_details.barcode }}</strong>
+            </div>
+            <ul class="list-group list-group-flush">
+                <li class="list-group-item"><strong>Name:</strong> {{ item_details.name }}</li>
+                <li class="list-group-item"><strong>Quantity:</strong> {{ item_details.quantity }}</li>
+                <li class="list-group-item"><strong>Last Updated:</strong> {{ item_details.last_updated }}</li>
+            </ul>
+        </div>
+    {% elif searched_barcode %}
+        <div class="alert alert-warning" role="alert">
+            Item with barcode <strong>{{ searched_barcode }}</strong> not found.
+        </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const barcodeInput = document.getElementById('barcode_lookup');
+        if (barcodeInput) {
+            // Only focus if no barcode already in query (meaning no search has been made yet)
+            if (!barcodeInput.value) {
+                barcodeInput.focus();
+            }
+        }
+    });
+</script>
+{% endblock %}
