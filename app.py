@@ -1,6 +1,6 @@
 import os
 import json
-from flask import Flask, render_template, request, redirect, url_for, flash, g
+from flask import Flask, render_template, request, redirect, url_for, flash, g, Response
 from datetime import datetime
 import settings_manager
 from google_sheets_helper import GoogleSheetsHelper
@@ -179,6 +179,54 @@ def inventory_list():
 
     return render_template('inventory_list.html', items=items, low_stock_threshold=LOW_STOCK_THRESHOLD)
 
+@app.route('/export_csv')
+def export_csv():
+    if not g.get('sheets_helper'):
+        flash("Application not configured. Please complete the setup.", "warning")
+        return redirect(url_for('setup'))
+
+    helper = g.sheets_helper
+    try:
+        items = helper.get_all_items()
+        if not items:
+            flash("No inventory items to export.", "info")
+            return redirect(url_for('inventory_list')) # Or wherever is appropriate
+
+        # Use io.StringIO to create an in-memory text buffer
+        import io
+        import csv
+        si = io.StringIO()
+        # Define fieldnames based on GoogleSheetsHelper.INVENTORY_COLS or expected output
+        # Ensure the order matches the desired CSV column order
+        fieldnames = [
+            GoogleSheetsHelper.INVENTORY_COLS[0], # Barcode
+            GoogleSheetsHelper.INVENTORY_COLS[1], # Name
+            GoogleSheetsHelper.INVENTORY_COLS[2], # Quantity
+            GoogleSheetsHelper.INVENTORY_COLS[3]  # Last Updated
+        ]
+
+        writer = csv.DictWriter(si, fieldnames=fieldnames)
+        writer.writeheader()
+        for item in items:
+            # Ensure all expected keys are present in item, defaulting if necessary
+            # The `get_all_items` should already return dicts with these keys
+            writer.writerow(item)
+
+        output = si.getvalue()
+
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-disposition":
+                     "attachment; filename=inventory_export.csv"})
+
+    except Exception as e:
+        flash(f"Error exporting CSV: {e}", "danger")
+        print(f"Error in /export_csv route: {e}")
+        import traceback
+        traceback.print_exc()
+        return redirect(url_for('inventory_list')) # Or home
+
 
 @app.route('/add_item_submit', methods=['POST'])
 def add_item_submit():
@@ -250,6 +298,100 @@ def update_inventory():
             return redirect(url_for('scan_page', last_barcode=barcode))
 
     return redirect(url_for('scan_page'))
+
+
+@app.route('/import_csv', methods=['GET', 'POST'])
+def import_csv():
+    if not g.get('sheets_helper'):
+        return redirect(url_for('setup'))
+    helper = g.sheets_helper
+
+    if request.method == 'POST':
+        if 'csv_file' not in request.files:
+            flash('No file part in the request.', 'danger')
+            return redirect(request.url)
+
+        file = request.files['csv_file']
+        if file.filename == '':
+            flash('No selected file.', 'warning')
+            return redirect(request.url)
+
+        if file and file.filename.endswith('.csv'):
+            try:
+                # Read the file stream directly
+                csv_content = file.stream.read().decode('utf-8-sig') # Use utf-8-sig to handle potential BOM
+
+                import io
+                import csv
+                si = io.StringIO(csv_content)
+                reader = csv.DictReader(si)
+
+                expected_headers = ['Barcode', 'Name', 'Quantity']
+                if not reader.fieldnames or not all(header in reader.fieldnames for header in expected_headers):
+                    flash(f"CSV file must have headers: {', '.join(expected_headers)}.", 'danger')
+                    return redirect(request.url)
+
+                items_to_upsert = []
+                row_errors = []
+                line_num = 1 # Start from 1 for header, data starts at 2
+
+                for row in reader:
+                    line_num += 1
+                    barcode = row.get('Barcode', '').strip()
+                    name = row.get('Name', '').strip()
+                    quantity_str = row.get('Quantity', '').strip()
+
+                    if not barcode:
+                        row_errors.append(f"Row {line_num}: Missing Barcode.")
+                        continue
+                    if not name: # Name can be optional for update if barcode exists, but let's require for simplicity of upsert
+                        row_errors.append(f"Row {line_num} (Barcode: {barcode}): Missing Name.")
+                        continue
+
+                    try:
+                        quantity = int(quantity_str)
+                        if quantity < 0:
+                            row_errors.append(f"Row {line_num} (Barcode: {barcode}): Quantity '{quantity_str}' cannot be negative.")
+                            continue
+                    except ValueError:
+                        row_errors.append(f"Row {line_num} (Barcode: {barcode}): Invalid Quantity '{quantity_str}'. Must be a whole number.")
+                        continue
+
+                    items_to_upsert.append({'Barcode': barcode, 'Name': name, 'Quantity': quantity})
+
+                if row_errors: # Flash individual row errors
+                    flash(row_errors, 'csv_errors')
+
+                if items_to_upsert:
+                    summary = helper.batch_upsert_items(items_to_upsert)
+                    flash_summary_parts = []
+                    if summary['added'] > 0:
+                        flash_summary_parts.append(f"{summary['added']} item(s) added.")
+                    if summary['updated'] > 0:
+                        flash_summary_parts.append(f"{summary['updated']} item(s) updated.")
+                    if not summary['added'] and not summary['updated'] and not row_errors and not summary['errors']:
+                         flash_summary_parts.append("No changes made; items might have matched existing data or no valid items were processed.")
+
+                    if summary['errors']: # Errors from the helper itself (e.g., API errors)
+                        flash(summary['errors'], 'csv_errors') # Append to any parsing errors
+
+                    if flash_summary_parts:
+                         flash(" ".join(flash_summary_parts), 'csv_summary')
+
+                    if not row_errors and not summary['errors'] and (summary['added'] or summary['updated']):
+                        return redirect(url_for('inventory_list')) # Success, show the list
+                elif not row_errors: # No items to upsert and no parsing errors
+                     flash("CSV file processed, but no valid items found to import or update.", "info")
+
+
+            except Exception as e:
+                flash(f"An error occurred processing the CSV file: {e}", 'danger')
+                import traceback
+                traceback.print_exc()
+
+            return redirect(request.url) # Show import page again with messages
+
+    return render_template('import_inventory_csv.html')
 
 
 if __name__ == '__main__':

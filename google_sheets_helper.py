@@ -439,3 +439,109 @@ if __name__ == '__main__':
             import traceback
             traceback.print_exc()
             return []
+
+    def batch_upsert_items(self, items_data: list[dict]) -> dict:
+        """
+        Batch upserts items into the Inventory sheet.
+        Updates existing items (based on Barcode) or adds new ones.
+        items_data: list of dicts, each like {'Barcode': '...', 'Name': '...', 'Quantity': ...}
+        Returns a summary dict: {'added': count, 'updated': count, 'errors': list_of_error_details}
+        """
+        if not self.service:
+            return {'added': 0, 'updated': 0, 'errors': ["Google Sheets service not initialized."]}
+        if not items_data:
+            return {'added': 0, 'updated': 0, 'errors': ["No items data provided for upsert."]}
+
+        summary = {'added': 0, 'updated': 0, 'errors': []}
+
+        try:
+            # 1. Get all current barcodes and their row numbers
+            # Range A:A gets all barcodes, B:D for corresponding data to avoid multiple reads for names
+            range_name_all_inventory = f"'{INVENTORY_SHEET_NAME}'!A2:D"
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.sheet_id, range=range_name_all_inventory
+            ).execute()
+
+            existing_rows_values = result.get('values', [])
+
+            # Create a map of barcode -> {row_index (0-based for list), name, quantity, last_updated}
+            # The row_index here is 0-based relative to the start of the data range (A2)
+            existing_items_map = {}
+            for i, row_val in enumerate(existing_rows_values):
+                if row_val and len(row_val) > 0 and row_val[0]: # Check if barcode exists
+                    barcode = str(row_val[0])
+                    existing_items_map[barcode] = {
+                        'row_index_in_data': i, # 0-based index within the A2:D data
+                        'sheet_row_num': i + 2,   # 1-based sheet row number (A2 is row 2)
+                        'name': str(row_val[1]) if len(row_val) > 1 else '',
+                        'quantity': int(float(str(row_val[2]))) if len(row_val) > 2 and str(row_val[2]).strip() else 0,
+                        'last_updated': str(row_val[3]) if len(row_val) > 3 else ''
+                    }
+
+            update_requests_data = [] # For batchUpdate: {'range': ..., 'values': ...}
+            new_rows_to_append = []   # For append operation: list of lists
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            for item_csv in items_data:
+                barcode_csv = str(item_csv['Barcode'])
+                name_csv = str(item_csv['Name'])
+                try:
+                    quantity_csv = int(item_csv['Quantity'])
+                    if quantity_csv < 0:
+                        summary['errors'].append(f"Barcode {barcode_csv}: Quantity {quantity_csv} is negative, skipping.")
+                        continue
+                except (ValueError, TypeError):
+                    summary['errors'].append(f"Barcode {barcode_csv}: Invalid quantity '{item_csv['Quantity']}', skipping.")
+                    continue
+
+                existing_item = existing_items_map.get(barcode_csv)
+
+                if existing_item: # Item exists, prepare for update
+                    # Only update if name or quantity is different to minimize writes & log entries
+                    if existing_item['name'] != name_csv or existing_item['quantity'] != quantity_csv:
+                        sheet_row_num = existing_item['sheet_row_num']
+                        # Update Name (Col B), Quantity (Col C), Last Updated (Col D)
+                        update_range = f"'{INVENTORY_SHEET_NAME}'!B{sheet_row_num}:D{sheet_row_num}"
+                        update_requests_data.append({
+                            'range': update_range,
+                            'values': [[name_csv, quantity_csv, timestamp]]
+                        })
+                        self.add_log_entry(barcode_csv, "UPDATE_ITEM_CSV", f"Name: {name_csv}, Qty: {quantity_csv} (was {existing_item['name']}, {existing_item['quantity']})")
+                        summary['updated'] += 1
+                    # else: item is identical, no action needed for this one
+
+                else: # Item is new, prepare for append
+                    new_rows_to_append.append([barcode_csv, name_csv, quantity_csv, timestamp])
+                    self.add_log_entry(barcode_csv, "ADD_ITEM_CSV", f"Name: {name_csv}, Qty: {quantity_csv}")
+                    summary['added'] += 1
+
+            # Execute batch updates if any
+            if update_requests_data:
+                body = {'valueInputOption': 'USER_ENTERED', 'data': update_requests_data}
+                self.service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=self.sheet_id, body=body
+                ).execute()
+
+            # Execute append if any new rows
+            if new_rows_to_append:
+                self.service.spreadsheets().values().append(
+                    spreadsheetId=self.sheet_id,
+                    range=f"'{INVENTORY_SHEET_NAME}'!A:D",
+                    valueInputOption='USER_ENTERED',
+                    insertDataOption='INSERT_ROWS',
+                    body={'values': new_rows_to_append}
+                ).execute()
+
+        except HttpError as e:
+            err_msg = f"Google Sheets API error during batch upsert: {e}"
+            print(err_msg)
+            summary['errors'].append(err_msg)
+        except Exception as e:
+            err_msg = f"Unexpected error during batch upsert: {e}"
+            print(err_msg)
+            import traceback
+            traceback.print_exc()
+            summary['errors'].append(err_msg)
+
+        return summary
