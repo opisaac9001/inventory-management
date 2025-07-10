@@ -194,7 +194,7 @@ class GoogleSheetsHelper:
             return None
 
 
-    def add_item(self, barcode: str, name: str, quantity: int) -> bool:
+    def add_item(self, barcode: str, name: str, quantity: int, user: str = "System") -> bool:
         """Adds a new item to the Inventory sheet."""
         if self.find_item_row(barcode):
             print(f"Item with barcode {barcode} already exists.")
@@ -211,7 +211,7 @@ class GoogleSheetsHelper:
                 insertDataOption='INSERT_ROWS',
                 body={'values': [item_data]}
             ).execute()
-            self.add_log_entry(barcode, "ADD_ITEM", f"Name: {name}, Initial Qty: {quantity}")
+            self.add_log_entry(barcode, "ADD_ITEM", f"Name: {name}, Initial Qty: {quantity}", user=user)
             return True
         except HttpError as e:
             print(f"Google Sheets API error in add_item: {e}")
@@ -220,7 +220,7 @@ class GoogleSheetsHelper:
             print(f"Invalid quantity provided for item {barcode}: {quantity}")
             return False
 
-    def update_item_quantity(self, barcode: str, quantity_change: int, mode: str) -> int | None:
+    def update_item_quantity(self, barcode: str, quantity_change: int, mode: str, user: str = "System") -> int | None:
         """Updates quantity of an existing item. Returns new quantity or None."""
         row_num = self.find_item_row(barcode)
         if not row_num or not self.service:
@@ -266,7 +266,7 @@ class GoogleSheetsHelper:
 
             action_details = f"Mode: {mode.upper()}, Change: {quantity_change}, New Qty: {new_quantity}"
             action_log = f"UPDATE_QTY ({item_name or 'N/A'})"
-            self.add_log_entry(barcode, action_log, action_details)
+            self.add_log_entry(barcode, action_log, action_details, user=user)
             return new_quantity
         except HttpError as e:
             print(f"Google Sheets API error in update_item_quantity: {e}")
@@ -278,7 +278,7 @@ class GoogleSheetsHelper:
             print(f"Unexpected error in update_item_quantity: {e}")
             return None
 
-    def add_log_entry(self, barcode: str, action: str, details: str, user: str = "System") -> bool:
+    def add_log_entry(self, barcode: str, action: str, details: str, user: str = "System") -> bool: # user default
         """Adds an entry to the Log sheet."""
         if not self.service: return False
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -447,6 +447,11 @@ if __name__ == '__main__':
         items_data: list of dicts, each like {'Barcode': '...', 'Name': '...', 'Quantity': ...}
         Returns a summary dict: {'added': count, 'updated': count, 'errors': list_of_error_details}
         """
+        # Default user for CSV operations if not specified by calling function
+        # However, app.py should now pass the identified user or a system default.
+        # This 'user' parameter in batch_upsert_items is the one to use for logging.
+        user_for_log = user
+
         if not self.service:
             return {'added': 0, 'updated': 0, 'errors': ["Google Sheets service not initialized."]}
         if not items_data:
@@ -507,13 +512,13 @@ if __name__ == '__main__':
                             'range': update_range,
                             'values': [[name_csv, quantity_csv, timestamp]]
                         })
-                        self.add_log_entry(barcode_csv, "UPDATE_ITEM_CSV", f"Name: {name_csv}, Qty: {quantity_csv} (was {existing_item['name']}, {existing_item['quantity']})")
+                        self.add_log_entry(barcode_csv, "UPDATE_ITEM_CSV", f"Name: {name_csv}, Qty: {quantity_csv} (was {existing_item['name']}, {existing_item['quantity']})", user=user_for_log)
                         summary['updated'] += 1
                     # else: item is identical, no action needed for this one
 
                 else: # Item is new, prepare for append
                     new_rows_to_append.append([barcode_csv, name_csv, quantity_csv, timestamp])
-                    self.add_log_entry(barcode_csv, "ADD_ITEM_CSV", f"Name: {name_csv}, Qty: {quantity_csv}")
+                    self.add_log_entry(barcode_csv, "ADD_ITEM_CSV", f"Name: {name_csv}, Qty: {quantity_csv}", user=user_for_log)
                     summary['added'] += 1
 
             # Execute batch updates if any

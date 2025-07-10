@@ -1,7 +1,7 @@
 import os
 import json
-from flask import Flask, render_template, request, redirect, url_for, flash, g, Response
-from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for, flash, g, Response, session
+from datetime import datetime, timedelta # Added timedelta
 import settings_manager
 from google_sheets_helper import GoogleSheetsHelper
 
@@ -54,16 +54,66 @@ def get_sheets_helper():
 
 
 @app.before_request
-def check_setup():
-    """Checks if the application is configured before handling most requests."""
-    if request.endpoint == 'setup' or request.path.startswith('/static/'):
-        return # Allow access to setup page and static files
+def before_request_checks():
+    """
+    Checks for application setup and user identification before handling most requests.
+    Also handles session activity timeout.
+    """
+    # Define endpoints that are always allowed, regardless of setup or user identification
+    allowed_endpoints = ['setup', 'identify_user', 'logout', 'static']
+    if request.endpoint in allowed_endpoints or request.path.startswith('/static'): # Double check for static
+        return
 
-    g.sheets_helper = get_sheets_helper() # Ensure it's attempted to load
+    # 1. Check Application Setup (Google Sheets connection)
+    # This part is similar to the previous check_setup
+    g.sheets_helper = get_sheets_helper()
     if not g.sheets_helper:
-        flash("Application not configured. Please complete the setup.", "warning")
+        flash("Application not configured. Please complete the Google Sheets setup.", "warning")
+        session['next_url'] = request.url # Store intended URL before redirecting to setup
         return redirect(url_for('setup'))
-    # If helper is available, proceed to the requested endpoint
+
+    # 2. Check User Identification & Activity Timeout
+    user_name = session.get('user_name')
+    last_activity_str = session.get('last_activity') # Stored as ISO string by some session interfaces, or datetime obj
+
+    if not user_name:
+        flash("Please identify yourself to continue.", "info")
+        session['next_url'] = request.url # Store intended URL
+        return redirect(url_for('identify_user'))
+
+    # User is identified, check for activity timeout
+    if last_activity_str:
+        # Flask session typically stores datetime objects directly if they are JSON serializable.
+        # If it were stored as a string (e.g., session['last_activity'] = datetime.utcnow().isoformat()),
+        # you'd need: last_activity = datetime.fromisoformat(last_activity_str)
+        # Assuming it's stored as a datetime object directly by Flask's default session interface:
+        last_activity = session['last_activity'] # Should be a datetime object
+
+        # Ensure last_activity is indeed a datetime object, defensive coding
+        if not isinstance(last_activity, datetime):
+            try: # Attempt to parse if it was stored as string somehow
+                last_activity = datetime.fromisoformat(str(last_activity_str))
+            except (ValueError, TypeError):
+                # If parsing fails, treat as invalid session state, force re-identification
+                session.pop('user_name', None)
+                session.pop('last_activity', None)
+                flash("Session error. Please identify yourself again.", "warning")
+                return redirect(url_for('identify_user'))
+
+        if datetime.utcnow() - last_activity > timedelta(minutes=20):
+            session.pop('user_name', None)
+            session.pop('last_activity', None)
+            flash("You have been logged out due to inactivity. Please identify yourself again.", "warning")
+            session['next_url'] = request.url # Store intended URL
+            return redirect(url_for('identify_user'))
+    else: # No last_activity timestamp, but user_name exists - inconsistent state, force re-identify
+        session.pop('user_name', None)
+        flash("Session information incomplete. Please identify yourself again.", "warning")
+        return redirect(url_for('identify_user'))
+
+    # If all checks pass and user is active, update last_activity timestamp
+    session['last_activity'] = datetime.utcnow()
+    g.user_name = user_name # Make user_name available in g for the current request if needed
 
 
 @app.route('/setup', methods=['GET', 'POST'])
@@ -230,8 +280,13 @@ def export_csv():
 
 @app.route('/add_item_submit', methods=['POST'])
 def add_item_submit():
-    if not g.get('sheets_helper'): return redirect(url_for('setup'))
+    # g.sheets_helper and g.user_name are expected to be set by before_request_checks
+    if not g.get('sheets_helper'): return redirect(url_for('setup')) # Should be caught by before_request_checks
+    if not g.get('user_name'): return redirect(url_for('identify_user')) # Should be caught by before_request_checks
+
     helper = g.sheets_helper
+    user_name = g.user_name # Or session.get('user_name', 'Unknown_User')
+
     if request.method == 'POST':
         barcode = request.form.get('barcode')
         name = request.form.get('name')
@@ -248,12 +303,12 @@ def add_item_submit():
                 quantity = 0
         except (ValueError, TypeError):
             flash("Invalid quantity. Please enter a whole number. It will be set to 0.", "warning")
-            quantity = 0 # Default to 0
+            quantity = 0
 
         if helper.find_item_row(barcode):
             flash(f"Item with barcode {barcode} already exists.", "warning")
-        elif helper.add_item(barcode, name, quantity):
-            flash(f"Item '{name}' (Barcode: {barcode}) added successfully with quantity {quantity}.", "success")
+        elif helper.add_item(barcode, name, quantity, user=user_name): # Pass user_name
+            flash(f"Item '{name}' (Barcode: {barcode}) added by {user_name} with quantity {quantity}.", "success")
         else:
             flash(f"Failed to add item '{name}'. Check logs or Google Sheet API errors.", "danger")
 
@@ -263,7 +318,11 @@ def add_item_submit():
 @app.route('/update_inventory', methods=['POST'])
 def update_inventory():
     if not g.get('sheets_helper'): return redirect(url_for('setup'))
+    if not g.get('user_name'): return redirect(url_for('identify_user'))
+
     helper = g.sheets_helper
+    user_name = g.user_name
+
     if request.method == 'POST':
         barcode = request.form.get('barcode')
         quantity_str = request.form.get('quantity', '1')
@@ -286,12 +345,12 @@ def update_inventory():
             flash(f"Item with barcode {barcode} not found. Please add it first.", "warning")
             return redirect(url_for('add_item_page', barcode=barcode))
 
-        updated_quantity = helper.update_item_quantity(barcode, quantity_change, mode)
+        updated_quantity = helper.update_item_quantity(barcode, quantity_change, mode, user=user_name) # Pass user_name
 
         if updated_quantity is not None:
             item_details = helper.get_item_details(barcode)
             item_name = item_details.get(GoogleSheetsHelper.INVENTORY_COLS[1], barcode) if item_details else barcode
-            flash(f"Successfully updated '{item_name}'. New quantity: {updated_quantity}.", "success")
+            flash(f"Successfully updated '{item_name}' by {user_name}. New quantity: {updated_quantity}.", "success")
             return redirect(url_for('scan_page', last_barcode=barcode))
         else:
             flash(f"Failed to update quantity for barcode {barcode}. Check logs or Google Sheet API errors.", "danger")
@@ -302,9 +361,17 @@ def update_inventory():
 
 @app.route('/import_csv', methods=['GET', 'POST'])
 def import_csv():
-    if not g.get('sheets_helper'):
-        return redirect(url_for('setup'))
+    if not g.get('sheets_helper'): return redirect(url_for('setup'))
+    # For CSV import, user identification might still be relevant for who initiated the import.
+    if not g.get('user_name') and request.method == 'POST': # Only strictly require user for POST
+         flash("Please identify yourself before importing a CSV.", "warning")
+         return redirect(url_for('identify_user', next=url_for('import_csv')))
+
     helper = g.sheets_helper
+    # User for logging CSV actions. If no interactive user, could be a system default.
+    # For actions within batch_upsert_items, it will pass this user.
+    log_user = g.get('user_name', 'CSV_IMPORT_SYSTEM')
+
 
     if request.method == 'POST':
         if 'csv_file' not in request.files:
@@ -318,8 +385,7 @@ def import_csv():
 
         if file and file.filename.endswith('.csv'):
             try:
-                # Read the file stream directly
-                csv_content = file.stream.read().decode('utf-8-sig') # Use utf-8-sig to handle potential BOM
+                csv_content = file.stream.read().decode('utf-8-sig')
 
                 import io
                 import csv
@@ -333,7 +399,7 @@ def import_csv():
 
                 items_to_upsert = []
                 row_errors = []
-                line_num = 1 # Start from 1 for header, data starts at 2
+                line_num = 1
 
                 for row in reader:
                     line_num += 1
@@ -344,7 +410,7 @@ def import_csv():
                     if not barcode:
                         row_errors.append(f"Row {line_num}: Missing Barcode.")
                         continue
-                    if not name: # Name can be optional for update if barcode exists, but let's require for simplicity of upsert
+                    if not name:
                         row_errors.append(f"Row {line_num} (Barcode: {barcode}): Missing Name.")
                         continue
 
@@ -359,11 +425,12 @@ def import_csv():
 
                     items_to_upsert.append({'Barcode': barcode, 'Name': name, 'Quantity': quantity})
 
-                if row_errors: # Flash individual row errors
+                if row_errors:
                     flash(row_errors, 'csv_errors')
 
                 if items_to_upsert:
-                    summary = helper.batch_upsert_items(items_to_upsert)
+                    # Pass the identified user (or system default if no interactive user for POST)
+                    summary = helper.batch_upsert_items(items_to_upsert, user=log_user)
                     flash_summary_parts = []
                     if summary['added'] > 0:
                         flash_summary_parts.append(f"{summary['added']} item(s) added.")
@@ -372,26 +439,51 @@ def import_csv():
                     if not summary['added'] and not summary['updated'] and not row_errors and not summary['errors']:
                          flash_summary_parts.append("No changes made; items might have matched existing data or no valid items were processed.")
 
-                    if summary['errors']: # Errors from the helper itself (e.g., API errors)
-                        flash(summary['errors'], 'csv_errors') # Append to any parsing errors
+                    if summary['errors']:
+                        flash(summary['errors'], 'csv_errors')
 
                     if flash_summary_parts:
-                         flash(" ".join(flash_summary_parts), 'csv_summary')
+                         flash(f"Import by {log_user}: " + " ".join(flash_summary_parts), 'csv_summary')
 
                     if not row_errors and not summary['errors'] and (summary['added'] or summary['updated']):
-                        return redirect(url_for('inventory_list')) # Success, show the list
-                elif not row_errors: # No items to upsert and no parsing errors
+                        return redirect(url_for('inventory_list'))
+                elif not row_errors:
                      flash("CSV file processed, but no valid items found to import or update.", "info")
-
 
             except Exception as e:
                 flash(f"An error occurred processing the CSV file: {e}", 'danger')
                 import traceback
                 traceback.print_exc()
 
-            return redirect(request.url) # Show import page again with messages
+            return redirect(request.url)
 
     return render_template('import_inventory_csv.html')
+
+@app.route('/identify_user', methods=['GET', 'POST'])
+def identify_user():
+    if request.method == 'POST':
+        user_name = request.form.get('user_name', '').strip()
+        if user_name:
+            session['user_name'] = user_name
+            session['last_activity'] = datetime.utcnow()
+            flash(f"Welcome, {user_name}!", "success")
+            # Redirect to intended page if stored, else home
+            next_url = session.pop('next_url', url_for('home'))
+            return redirect(next_url)
+        else:
+            flash("Please enter your name to continue.", "danger")
+    # For GET request or if POST fails validation
+    return render_template('identify_user.html')
+
+@app.route('/logout')
+def logout():
+    user_name = session.pop('user_name', None)
+    session.pop('last_activity', None)
+    if user_name:
+        flash(f"Successfully logged out, {user_name}.", "info")
+    else:
+        flash("Successfully logged out.", "info")
+    return redirect(url_for('identify_user'))
 
 
 if __name__ == '__main__':

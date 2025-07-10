@@ -32,19 +32,64 @@
                     <a class="nav-link" href="{{ url_for('inventory_list') }}">Inventory List</a>
                 </li>
             </ul>
+            <ul class="navbar-nav ml-auto">
+                {% if session.get('user_name') %}
+                    <li class="nav-item">
+                        <span class="navbar-text mr-3">
+                            User: <strong>{{ session.user_name }}</strong>
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link btn btn-sm btn-outline-secondary" href="{{ url_for('logout') }}">Logout / Change User</a>
+                    </li>
+                {% else %}
+                    {# Optionally, show a 'Login' or 'Identify' link if user is not identified and not on identify_user page #}
+                    {# This might be redundant due to @before_request redirecting to identify_user #}
+                    {% if request.endpoint != 'identify_user' and request.endpoint != 'setup' %}
+                         <li class="nav-item">
+                            <a class="nav-link btn btn-sm btn-outline-primary" href="{{ url_for('identify_user') }}">Identify User</a>
+                        </li>
+                    {% endif %}
+                {% endif %}
+            </ul>
         </div>
     </nav>
 
     <div class="container mt-4">
+        {# Flashed messages will now be handled by identify_user.html or setup.html for pre-login states #}
+        {# For main app pages, they are still useful #}
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-                            <span aria-hidden="true">&times;</span>
-                        </button>
-                    </div>
+                    {# Special handling for csv_errors and csv_summary if they can appear on pages using this layout #}
+                    {% if category == 'csv_errors' and message is iterable and message is not string %}
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <h6 class="alert-heading">CSV Import Errors:</h6>
+                            <ul class="mb-0">
+                            {% for error_msg in message %}
+                                <li>{{ error_msg }}</li>
+                            {% endfor %}
+                            </ul>
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                        </div>
+                    {% elif category == 'csv_summary' %}
+                        <div class="alert alert-info alert-dismissible fade show" role="alert">
+                            <h6 class="alert-heading">CSV Import Summary:</h6>
+                            <p class="mb-0">{{ message }}</p>
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                        </div>
+                    {% endif %}
                 {% endfor %}
             {% endif %}
         {% endwith %}

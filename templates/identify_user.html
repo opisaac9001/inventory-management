@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Identify User</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            min-height: 100vh;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f9fa; /* Light gray background */
+        }
+        .identify-container {
+            max-width: 400px;
+            width: 100%;
+            padding: 2rem;
+            background-color: #fff;
+            border-radius: 0.5rem;
+            box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+        }
+    </style>
+</head>
+<body>
+    <div class="identify-container">
+        <h2 class="text-center mb-4">Welcome!</h2>
+        <p class="text-center text-muted">Please enter your name to continue.</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('identify_user') }}">
+            <div class="form-group">
+                <label for="user_name">Your Name:</label>
+                <input type="text" name="user_name" id="user_name" class="form-control" placeholder="Enter your name" required autofocus>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Continue</button>
+        </form>
+
+        {% if not session.get('user_name') and request.endpoint != 'setup' %}
+        <p class="text-center mt-3">
+            <small class="text-muted">
+                If you need to configure the application (Google Sheets setup), please go to the <a href="{{ url_for('setup') }}">Setup Page</a> first.
+            </small>
+        </p>
+        {% endif %}
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>
